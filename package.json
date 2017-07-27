@@ -4,7 +4,7 @@
   "description": "for solidity sample code",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "gulp build"
   },
   "repository": {
     "type": "git",
@@ -21,7 +21,16 @@
   },
   "homepage": "https://github.com/josudoey/eth-sol#readme",
   "dependencies": {
+    "camelcase": "^4.1.0",
     "commander": "^2.11.0",
+    "globby": "^6.1.0",
+    "gulp": "^3.9.1",
+    "gulp-smake": "^0.2.2",
+    "gulp-util": "^3.0.8",
+    "once": "^1.4.0",
     "solc": "^0.4.13"
+  },
+  "devDependencies": {
+    "mkdirp": "^0.5.1"
   }
 }
