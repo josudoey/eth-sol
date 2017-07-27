@@ -2,10 +2,9 @@ const path = require("path");
 const globby = require('globby')
 const gulp = require("gulp");
 const gutil = require('gulp-util');
-const mkdirp = require('mkdirp')
 
 const solPath = "./sol";
-const outputPath = "./construct"
+const outputPath = "./contract"
 const child_process = require('child_process')
 gulp.task("build", function () {
   const paths = globby.sync(solPath + '/**/*.sol', {
@@ -22,10 +21,5 @@ gulp.task("build", function () {
     stdio: ['ignore', process.stdout, process.stderr]
   })
 
-  /*
-    stream.on("data", function (data) {
-        gutil.log(`build ${data.path}`)
-    }) return stream
-   */
 });
 

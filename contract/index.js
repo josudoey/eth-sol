@@ -1,6 +1,7 @@
+const fs = require('fs')
+const path = require('path')
 const globby = require('globby')
 const camelCase = require('camelcase')
-const fs = require('fs')
 const once = require('once')
 exports = module.exports = {}
 

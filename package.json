@@ -22,13 +22,13 @@
   "homepage": "https://github.com/josudoey/eth-sol#readme",
   "dependencies": {
     "camelcase": "^4.1.0",
+    "co": "^4.6.0",
     "commander": "^2.11.0",
     "globby": "^6.1.0",
     "gulp": "^3.9.1",
-    "gulp-smake": "^0.2.2",
     "gulp-util": "^3.0.8",
     "once": "^1.4.0",
-    "solc": "^0.4.13"
+    "web3": "^1.0.0-beta.12"
   },
   "devDependencies": {
     "mkdirp": "^0.5.1"
