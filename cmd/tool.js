@@ -5,9 +5,11 @@ const env = process.env
 const Web3 = require('web3')
 const co = require('co')
 
+//ref http://web3js.readthedocs.io/en/1.0/web3-eth.html
+
 module.exports = function (prog) {
   prog.option('--keystore <keystote>', 'keystore path default: ./keystote', __dirname + "/../keystore")
-  prog.option('--use <address>', 'use wallet address (env["ETHERBASE"] or defualt: "0")', '0')
+  prog.option('--use <address>', 'use wallet address (env["ETHERBASE"] or defualt: "0")', env.ETHERBASE || '0')
   prog.option('--rpcapi <url>', 'use HTTP-RPC interface (env["RPCAPI"] or defualt: "http://localhost:8545")', env.RPCAPI || "http://localhost:8545")
   prog.option('--password <password>', 'use HTTP-RPC interface (env["PASSWORD"] or defualt: "")', env.PASSWORD || "")
   let web3, eth
@@ -42,13 +44,16 @@ module.exports = function (prog) {
   }
   prog
     .command('list')
+    .option('--key', 'show key')
     .description('list account')
-    .action(function (name, opts) {
+    .action(function (opts) {
       init()
       for (let i = 0; i < eth.accounts.wallet.length; i++) {
         const w = eth.accounts.wallet[i]
         console.log(`wallet[${i}] address: ${w.address}`)
-        console.log(`wallet[${i}] privateKey: ${w.privateKey}`)
+        if (opts.key) {
+          console.log(`wallet[${i}] privateKey: ${w.privateKey}`)
+        }
       }
     })
 
@@ -96,6 +101,104 @@ module.exports = function (prog) {
         console.log(`${i.type}${hasPayable}${methodName}(${display})${hasConstant}${returns};`)
       }
 
+    }))
+
+  prog
+    .command('price')
+    .option('--gas <gasLimit>', 'gas limit', undefined)
+    .option('--price <gasPrice>', 'gas price', '100')
+    .option('--nonce <nonce>', 'tx nonce', undefined)
+    .option('--send', 'send tx')
+    .description('Returns the current gas price oracle. The gas price is determined by the last few blocks median gas price.')
+    .action(co.wrap(function* (to, value, opts) {
+      init()
+
+      const result = yield eth.getGasPrice()
+      console.log(result)
+
+    }))
+
+  prog
+    .command('tx <hash>')
+    .description('Returns a transaction matching the given transaction hash.')
+    .action(co.wrap(function* (hash, opts) {
+      init()
+
+      const result = yield eth.getTransaction(hash)
+      console.log(JSON.stringify(result, null, 4))
+    }))
+
+  prog
+    .command('transfer <to> <wei>')
+    .option('--gas <gasLimit>', 'gas limit', undefined)
+    .option('--price <gasPrice>', 'gas price', '100')
+    .option('--nonce <nonce>', 'tx nonce', undefined)
+    .option('--send', 'send tx')
+    .description('transfer value')
+    .action(co.wrap(function* (to, value, opts) {
+      init()
+
+      const wallet = eth.accounts.wallet[prog.use]
+      const from = wallet.address
+      if (!opts.gas) {
+        opts.gas = yield eth.estimateGas({
+          to: to
+        })
+      }
+      console.log(`${from} to ${to} ${value} wei gas:${opts.gas} gasPrice:${opts.price}`)
+
+      const Tx = require('ethereumjs-tx');
+      let count = yield eth.getTransactionCount(from)
+      var rawTx = {
+        nonce: web3.utils.toHex(opts.nonce || count),
+        gasPrice: web3.utils.toHex(opts.price),
+        gasLimit: web3.utils.toHex(opts.gas),
+        to: to,
+        value: web3.utils.toHex(value),
+        data: '0x'
+      }
+      const tx = new Tx(rawTx);
+      tx.sign(Buffer.from(wallet.privateKey.replace(/^0x/, ''), 'hex'));
+      const serializedTx = tx.serialize();
+      const json = {}
+      json['hash'] = '0x' + tx.hash().toString('hex')
+      json['nonce'] = web3.utils.hexToNumber('0x' + tx.nonce.toString('hex'))
+      json['gasLimit'] = web3.utils.hexToNumber('0x' + tx.gasLimit.toString('hex'))
+      json['gasPrice'] = web3.utils.hexToNumber('0x' + tx.gasPrice.toString('hex')).toString()
+      json['input'] = '0x' + tx.input.toString('hex')
+      json['to'] = '0x' + tx.to.toString('hex')
+      json['value'] = web3.utils.hexToNumber('0x' + tx.value.toString('hex')).toString()
+      json['v'] = '0x' + tx.v.toString('hex')
+      json['r'] = '0x' + tx.r.toString('hex')
+      json['s'] = '0x' + tx.s.toString('hex')
+      console.log(json)
+      if (!opts.send) {
+        return;
+      }
+
+      const result = yield eth.sendSignedTransaction('0x' + serializedTx.toString('hex'))
+      console.log(JSON.stringify(result, null, 4))
+
+      /*
+      const action = eth.sendTransaction({
+        from: from,
+        to: to,
+        gas: opts.gas,
+        gasPrice: opts.price,
+        value: value
+      })
+
+      action.on('transactionHash', function (hash) {
+          console.error(`hash: ${hash}`)
+        })
+        .on('receipt', function (receipt) {
+          console.log(receipt)
+        })
+        .on('confirmation', function (confirmationNumber, receipt) {})
+        .on('error', console.error)
+      const result = yield action
+      console.log(JSON.stringify(result, null, 4))
+      */
     }))
 
   prog
