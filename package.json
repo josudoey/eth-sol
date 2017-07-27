@@ -1,0 +1,27 @@
+{
+  "name": "eth-sol",
+  "version": "1.0.0",
+  "description": "for solidity sample code",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/josudoey/eth-sol.git"
+  },
+  "keywords": [
+    "solidity",
+    "eth"
+  ],
+  "author": "JoeyFang",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/josudoey/eth-sol/issues"
+  },
+  "homepage": "https://github.com/josudoey/eth-sol#readme",
+  "dependencies": {
+    "commander": "^2.11.0",
+    "solc": "^0.4.13"
+  }
+}
