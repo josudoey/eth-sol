@@ -20,7 +20,8 @@ module.exports = function (prog) {
     const paths = globby.sync('*.json', {
       cwd: cwd,
       absolute: false,
-      nodir: true
+      nodir: true,
+      nosort: true
     })
 
     const keystotes = []
@@ -42,6 +43,19 @@ module.exports = function (prog) {
     eth.accounts.wallet.decrypt(keystotes, prog.password)
 
   }
+
+  prog
+    .command('create')
+    .description('create account')
+    .action(function (opts) {
+      web3 = new Web3();
+      const acc = web3.eth.accounts.create();
+      const keystore = acc.encrypt(prog.password)
+      const ctx = JSON.stringify(keystore, null, 4)
+      console.log(ctx)
+      fs.writeFileSync(path.join(prog.keystore, "~" + new Date().toISOString() + "." + keystore.address + ".json"), ctx)
+    })
+
   prog
     .command('list')
     .option('--key', 'show key')
