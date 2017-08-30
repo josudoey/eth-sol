@@ -4,6 +4,7 @@ const path = require('path')
 const env = process.env
 const Web3 = require('web3')
 const co = require('co')
+const moment = require('moment')
 
 //ref http://web3js.readthedocs.io/en/1.0/web3-eth.html
 
@@ -324,6 +325,10 @@ module.exports = function (prog) {
           from: from
         })
       }
+      if (opts.price) {
+        opts.price = yield eth.getGasPrice()
+      }
+
       console.error(`"${name}" contract at:${from} call method "${methodName}" ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
 
       if (!opts.send) {
@@ -340,6 +345,38 @@ module.exports = function (prog) {
         return;
       }
 
+      const wallet = eth.accounts.wallet[from]
+      let nonce = yield eth.getTransactionCount(from)
+      const Tx = require('ethereumjs-tx');
+      let data = func.encodeABI()
+      var rawTx = {
+        nonce: web3.utils.toHex(nonce),
+        gasPrice: web3.utils.toHex(opts.price),
+        gasLimit: web3.utils.toHex(opts.gas),
+        to: at,
+        value: web3.utils.toHex(value),
+        data: data
+      }
+      const tx = new Tx(rawTx);
+      tx.sign(Buffer.from(wallet.privateKey.replace(/^0x/, ''), 'hex'));
+      const serializedTx = tx.serialize();
+      const json = {}
+      json['hash'] = '0x' + tx.hash().toString('hex')
+      json['nonce'] = web3.utils.hexToNumber('0x' + tx.nonce.toString('hex'))
+      json['gasLimit'] = web3.utils.hexToNumber('0x' + tx.gasLimit.toString('hex'))
+      json['gasPrice'] = web3.utils.hexToNumber('0x' + tx.gasPrice.toString('hex')).toString()
+      json['input'] = '0x' + tx.input.toString('hex')
+      json['to'] = '0x' + tx.to.toString('hex')
+      json['value'] = web3.utils.hexToNumber('0x' + tx.value.toString('hex')).toString()
+      json['v'] = '0x' + tx.v.toString('hex')
+      json['r'] = '0x' + tx.r.toString('hex')
+      json['s'] = '0x' + tx.s.toString('hex')
+      console.log(json)
+
+      const result = yield eth.sendSignedTransaction('0x' + serializedTx.toString('hex'))
+      console.log(JSON.stringify(result, null, 4))
+
+      /*
       const result = yield func.send({
         from: from,
         value: value,
@@ -349,7 +386,7 @@ module.exports = function (prog) {
         console.log(err)
       })
       console.log(result)
-
+*/
     }))
 
 }
