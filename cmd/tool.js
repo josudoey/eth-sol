@@ -163,12 +163,40 @@ module.exports = function (prog) {
 
   prog
     .command('tx <hash>')
+    .option('--contract <contractName>', 'for event decode')
     .description('Returns a transaction matching the given transaction hash.')
     .action(co.wrap(function* (hash, opts) {
       initForWeb3()
 
       const result = yield eth.getTransactionReceiptAsync(hash)
       console.log(JSON.stringify(result, null, 4))
+      if (!opts.contract) {
+        return
+      }
+
+      const contracts = require('../lib/contracts')
+      const contract = contracts[opts.contract]
+      const SolidityEvent = require("web3/lib/web3/event.js");
+
+      for (const log of result.logs) {
+        var logABI = contract.events[log.topics[0]];
+        if (logABI == null) {
+          console.log('unknown')
+          continue;
+        }
+
+        var decoder = new SolidityEvent(null, logABI, result.to);
+        const e = decoder.decode(log);
+        const eventName = e.event
+        const args = e.args
+        let item = eventName
+        const inputs = logABI.inputs.map(function (input) {
+          const name = input.name
+          const val = args[name]
+          item += ` ${name}:${val.toString()}`
+        })
+        console.log(item)
+      }
     }))
 
   prog
