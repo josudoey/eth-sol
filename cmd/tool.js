@@ -132,6 +132,7 @@ module.exports = function (prog) {
       const item = contracts[name]
       const abi = item.abi
       for (const i of abi) {
+        i.inputs = i.inputs || []
         const display = i.inputs.map(function (o) {
           return `${o.type} ${o.name}`
         }).join(", ")
@@ -305,6 +306,12 @@ module.exports = function (prog) {
         }
       }
 
+      if (!constructor) {
+        console.log('constructor not define')
+        return
+      }
+
+      constructor.inputs = constructor.inputs || []
       if (constructor.inputs.length !== args.length) {
         const display = constructor.inputs.map(function (o) {
           return `<${o.name} ${o.type}>`
