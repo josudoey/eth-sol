@@ -440,6 +440,7 @@ module.exports = function (prog) {
       if (!opts.gas) {
         opts.gas = yield eth.estimateGasAsync({
           from: from,
+          to: at,
           value: value,
           data: data
         })
@@ -453,6 +454,11 @@ module.exports = function (prog) {
       console.error(`"${name}" contract at:${at} call method "${methodName}" ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
 
       if (!opts.send) {
+        const SolidityFunction = require("web3/lib/web3/function.js");
+        const funcAbi = abi.filter(function (json) {
+          return json.name === methodName
+        })[0]
+        const solidityFunction = new SolidityFunction(null, funcAbi, at)
         const result = yield eth.callAsync({
           from: from,
           to: at,
@@ -464,7 +470,7 @@ module.exports = function (prog) {
           console.log(err)
         })
 
-        console.log(result)
+        console.log(solidityFunction.unpackOutput(result).toString())
         return;
       }
 
