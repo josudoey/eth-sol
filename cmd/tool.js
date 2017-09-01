@@ -1,4 +1,5 @@
 const globby = require('globby')
+const rp = require('request-promise')
 const fs = require('fs')
 const path = require('path')
 const env = process.env
@@ -189,7 +190,7 @@ module.exports = function (prog) {
         const e = decoder.decode(log);
         const eventName = e.event
         const args = e.args
-        let item = eventName
+        let item = `${e.logIndex} ${eventName}`
         const inputs = logABI.inputs.map(function (input) {
           const name = input.name
           const val = args[name]
@@ -328,7 +329,6 @@ module.exports = function (prog) {
         opts.gas = yield eth.estimateGasAsync({
           from: from,
           value: value,
-          from: from,
           data: data
         })
       }
@@ -450,7 +450,7 @@ module.exports = function (prog) {
         opts.price += 1
       }
 
-      console.error(`"${name}" contract at:${from} call method "${methodName}" ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
+      console.error(`"${name}" contract at:${at} call method "${methodName}" ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
 
       if (!opts.send) {
         const result = yield eth.callAsync({
@@ -481,13 +481,12 @@ module.exports = function (prog) {
         data: data
       }
 
-      console.log(rawTx)
       const tx = new Tx(rawTx);
       tx.sign(wallet.getPrivateKey());
       const serializedTx = tx.serialize();
       const json = {}
       json['hash'] = '0x' + tx.hash().toString('hex')
-      json['nonce'] = web3.toDecimal('0x' + tx.nonce.toString('hex'))
+      json['nonce'] = web3.toDecimal('0x' + (tx.nonce.toString('hex') || '00'))
       json['gasLimit'] = web3.toDecimal('0x' + tx.gasLimit.toString('hex'))
       json['gasPrice'] = web3.toDecimal('0x' + tx.gasPrice.toString('hex'))
       json['to'] = '0x' + tx.to.toString('hex')
@@ -513,6 +512,144 @@ module.exports = function (prog) {
         return
       }
       console.error('wait timeout')
+
+    }))
+
+  prog
+    .command('getLogs <address>')
+    .option('--from <from>', 'integer block number (default:"earliest")', 'earliest')
+    .option('--to <to>', 'integer block number (default:"latest")', 'latest')
+    .option('--contract <contractName>', 'for event decode')
+    .description('get log')
+    .action(co.wrap(function* (address, opts) {
+      initForWeb3()
+      const providerUrl = prog.rpcapi
+      const body = {
+        "jsonrpc": "2.0",
+        "method": "eth_getLogs",
+        "params": [{
+          "fromBlock": isNaN(opts.from) ? opts.from : web3.toHex(opts.from),
+          "toBlock": isNaN(opts.to) ? opts.to : web3.toHex(opts.to),
+          "address": address.toLowerCase(),
+          "topics": []
+        }],
+        id: Date.now()
+      }
+
+      var options = {
+        method: 'POST',
+        uri: providerUrl,
+        body: body,
+        json: true // Automatically stringifies the body to JSON
+      };
+
+      const contracts = require('../lib/contracts')
+      let contract = contracts[opts.contract]
+      if (!contract) {
+        contract = {
+          events: {}
+        }
+      }
+      const SolidityEvent = require("web3/lib/web3/event.js");
+
+      const resp = yield rp(options)
+      for (const log of resp.result) {
+        var logABI = contract.events[log.topics[0]];
+        if (!logABI) {
+          console.log(JSON.stringify(log, null, 4))
+          continue;
+        }
+
+        var decoder = new SolidityEvent(null, logABI, log.address);
+        const e = decoder.decode(log);
+        const blockNumber = e.blockNumber
+        const eventName = e.event
+        const args = e.args
+        let item = `${blockNumber} ${eventName}`
+        const inputs = logABI.inputs.map(function (input) {
+          const name = input.name
+          const val = args[name]
+          item += ` ${name}:${val.toString()}`
+        })
+        console.log(item)
+
+      }
+
+    }))
+
+  prog
+    .command('watch <address>')
+    .option('--contract <contractName>', 'for event decode')
+    .description('watch ')
+    .action(co.wrap(function* (address, opts) {
+      initForWeb3()
+      const ProviderEngine = require("web3-provider-engine");
+      const Web3Subprovider = require("web3-provider-engine/subproviders/web3.js");
+      const providerUrl = prog.rpcapi
+      let lastHeight = null
+      const engine = new ProviderEngine();
+      engine.addProvider(new Web3Subprovider(new Web3.providers.HttpProvider(providerUrl)));
+      engine.on('block', co.wrap(function* (block) {
+        console.log('BLOCK CHANGED:', '#' + web3.toDecimal('0x' + block.number.toString('hex')), '0x' + block.hash.toString('hex'))
+
+        if (!lastHeight) {
+          lastHeight = '0x' + block.number.toString('hex')
+          return;
+        }
+
+        lastHeight = '0x' + block.number.toString('hex')
+        const body = {
+          "jsonrpc": "2.0",
+          "method": "eth_getLogs",
+          "params": [{
+            "fromBlock": lastHeight,
+            "toBlock": "latest",
+            "address": address.toLowerCase(),
+            "topics": []
+          }],
+          id: Date.now()
+        }
+
+        var options = {
+          method: 'POST',
+          uri: providerUrl,
+          body: body,
+          json: true // Automatically stringifies the body to JSON
+        };
+
+        const contracts = require('../lib/contracts')
+        let contract = contracts[opts.contract]
+        if (!contract) {
+          contract = {
+            events: {}
+          }
+        }
+        const SolidityEvent = require("web3/lib/web3/event.js");
+
+        const resp = yield rp(options)
+        for (const log of resp.result) {
+          var logABI = contract.events[log.topics[0]];
+          if (!logABI) {
+            console.log(JSON.stringify(log, null, 4))
+            continue;
+          }
+
+          var decoder = new SolidityEvent(null, logABI, log.address);
+          const e = decoder.decode(log);
+          const blockNumber = e.blockNumber
+          const eventName = e.event
+          const args = e.args
+          let item = `${blockNumber} ${eventName}`
+          const inputs = logABI.inputs.map(function (input) {
+            const name = input.name
+            const val = args[name]
+            item += ` ${name}:${val.toString()}`
+          })
+          console.log(item)
+
+        }
+      }))
+      engine.start()
 
     }))
 
