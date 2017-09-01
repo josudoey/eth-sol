@@ -1,7 +1,10 @@
 node_modules
-keystore
+truffle
 
 *.swp
 *.swo
 *.log
 *.swn
+
+# others
+.DS_Store

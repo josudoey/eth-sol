@@ -4,99 +4,132 @@ const path = require('path')
 const env = process.env
 const Web3 = require('web3')
 const co = require('co')
-const moment = require('moment')
-
-//ref http://web3js.readthedocs.io/en/1.0/web3-eth.html
+const delay = require('delay')
+const sjcl = require('sjcl')
+const bip39 = require('bip39');
+const bluebird = require('bluebird')
+const prompt = require('prompt-sync')({
+  sigint: true,
+  echo: '*'
+});
 
 module.exports = function (prog) {
   prog.option('--keystore <keystote>', 'keystore path default: ./keystote', __dirname + "/../keystore")
   prog.option('--use <address>', 'use wallet address (env["ETHERBASE"] or defualt: "0")', env.ETHERBASE || '0')
   prog.option('--rpcapi <url>', 'use HTTP-RPC interface (env["RPCAPI"] or defualt: "http://localhost:8545")', env.RPCAPI || "http://localhost:8545")
   prog.option('--password <password>', 'use HTTP-RPC interface (env["PASSWORD"] or defualt: "")', env.PASSWORD || "")
-  let web3, eth
-  const init = function () {
+  prog.option('--wallet <path>', 'wallet file path(env["WALLET"] or defualt: "./.wallet")', env.PASSWORD || path.resolve(__dirname + '/../.wallet'))
+  prog.option('--index <index>', 'wallet use index default: 0')
+
+  let web3, eth, wallet, mnemonic
+  const getNewPassword = function () {
+    let password = ''
+    while (true) {
+      password = prompt('new password: ', {
+        echo: '*'
+      })
+      if (!password) {
+        continue
+      }
+      let password2 = prompt('retype new password: ', {
+        echo: '*'
+      })
+
+      if (password !== password2) {
+        console.log('password not match')
+        continue
+      }
+      break
+    }
+    return password
+  }
+  const initForWeb3 = function () {
     web3 = new Web3(new Web3.providers.HttpProvider(prog.rpcapi));
-    eth = web3.eth
-    const cwd = prog.keystore
-    const paths = globby.sync('*.json', {
-      cwd: cwd,
-      absolute: false,
-      nodir: true,
-      nosort: true
-    })
-
-    const keystotes = []
-    for (fn of paths) {
-      const data = fs.readFileSync(
-        path.join(cwd, fn)
-      )
+    eth = bluebird.promisifyAll(web3.eth)
+    web3.eth = eth
+  }
+  const initForWallet = function () {
+    const walletPath = prog.wallet
+    const exists = fs.existsSync(walletPath)
+    if (!exists) {
+      mnemonic = prompt('input seed mnemonic word [empty is random]:')
+      if (!mnemonic) {
+        mnemonic = bip39.generateMnemonic()
+      }
+      const password = getNewPassword()
+      const ciphertext = sjcl.encrypt(password, mnemonic)
+      console.log(`write wallet secret on ${walletPath}`)
+      fs.writeFileSync(walletPath, ciphertext)
+    } else {
+      const ciphertext = fs.readFileSync(walletPath).toString()
       try {
-        var json = JSON.parse(data)
-        if (json.version !== 3) {
-          throw new Error('Not a valid V3 wallet')
-        }
-        keystotes.push(json)
+        const password = prompt('enter password: ', {
+          echo: '*'
+        })
+        mnemonic = sjcl.decrypt(password, ciphertext)
       } catch (e) {
-
+        console.log('password not match')
+        process.exit(-1)
       }
     }
+    wallet = require('../lib/wallet')(mnemonic)
+    if (prog.index) {
+      wallet = wallet.index(parseInt(prog.index))
+    }
 
-    eth.accounts.wallet.decrypt(keystotes, prog.password)
-
+  }
+  const init = function () {
+    initForWeb3()
+    initForWallet()
   }
 
   prog
-    .command('create')
-    .description('create account')
-    .action(function (opts) {
-      web3 = new Web3();
-      const acc = web3.eth.accounts.create();
-      const keystore = acc.encrypt(prog.password)
-      const ctx = JSON.stringify(keystore, null, 4)
-      console.log(ctx)
-      fs.writeFileSync(path.join(prog.keystore, "~" + new Date().toISOString() + "." + keystore.address + ".json"), ctx)
-    })
-
-  prog
-    .command('list')
-    .option('--key', 'show key')
-    .description('list account')
-    .action(function (opts) {
+    .command('mnemonic')
+    .description('show wallet mnemonic')
+    .action(co.wrap(function* (opts) {
       init()
-      for (let i = 0; i < eth.accounts.wallet.length; i++) {
-        const w = eth.accounts.wallet[i]
-        console.log(`wallet[${i}] address: ${w.address}`)
-        if (opts.key) {
-          console.log(`wallet[${i}] privateKey: ${w.privateKey}`)
-        }
-      }
-    })
-
-  prog
-    .command('balance [address]')
-    .description('query currency balance')
-    .action(co.wrap(function* (address, opts) {
-      init()
-      address = address || eth.accounts.wallet[prog.use].address
-      console.log(`query balance ${address}`)
-      const balance = yield web3.eth.getBalance(address)
-      console.log(`balance: ${balance}`)
+      console.log(`${mnemonic}`)
     }))
 
   prog
-    .command('show [name]')
+    .command('chpasswd')
+    .description('change wallet password')
+    .action(co.wrap(function* (opts) {
+      init()
+      const walletPath = prog.wallet
+      const password = getNewPassword()
+      const ciphertext = sjcl.encrypt(password, mnemonic)
+      fs.writeFileSync(walletPath, ciphertext)
+      console.log(`password change success`)
+    }))
+
+  prog
+    .command('balance [address]')
+    .description('query wallet balance')
+    .action(co.wrap(function* (address, opts) {
+      if (!address) {
+        initForWallet()
+        address = wallet.address
+      }
+      initForWeb3()
+      const balance = yield web3.eth.getBalanceAsync(address)
+      console.log(`${address} balance: ${balance.toString()}`)
+    }))
+
+  prog
+    .command('show [name] [args...]')
     .description('show contract method')
-    .action(co.wrap(function* (name, opts) {
-      const contract = require('../contract')
+    .action(co.wrap(function* (name, args, opts) {
+      const contracts = require('../lib/contracts')
       if (!name) {
-        for (const key of Object.keys(contract)) {
+        for (const key of Object.keys(contracts)) {
           console.log(key)
         }
         return
       }
 
-      const item = contract[name]
-      const abi = item.interface
+      const item = contracts[name]
+      const abi = item.abi
       for (const i of abi) {
         const display = i.inputs.map(function (o) {
           return `${o.type} ${o.name}`
@@ -120,69 +153,76 @@ module.exports = function (prog) {
 
   prog
     .command('price')
-    .option('--gas <gasLimit>', 'gas limit', undefined)
-    .option('--price <gasPrice>', 'gas price', '100')
-    .option('--nonce <nonce>', 'tx nonce', undefined)
-    .option('--send', 'send tx')
     .description('Returns the current gas price oracle. The gas price is determined by the last few blocks median gas price.')
-    .action(co.wrap(function* (to, value, opts) {
-      init()
+    .action(co.wrap(function* (opts) {
+      initForWeb3()
 
-      const result = yield eth.getGasPrice()
-      console.log(result)
-
+      const result = yield eth.getGasPriceAsync()
+      console.log(`gas price: ${result}`)
     }))
 
   prog
     .command('tx <hash>')
     .description('Returns a transaction matching the given transaction hash.')
     .action(co.wrap(function* (hash, opts) {
-      init()
+      initForWeb3()
 
-      const result = yield eth.getTransaction(hash)
+      const result = yield eth.getTransactionReceiptAsync(hash)
       console.log(JSON.stringify(result, null, 4))
     }))
 
   prog
     .command('transfer <to> <wei>')
-    .option('--gas <gasLimit>', 'gas limit', undefined)
-    .option('--price <gasPrice>', 'gas price', '100')
+    .option('--gas <gasLimit>', 'gas limit')
+    .option('--price <gasPrice>', 'gas price')
     .option('--nonce <nonce>', 'tx nonce', undefined)
+    .option('--wait', 'wait receipt until block mine')
+    .option('--delay [delay]', 'retry receipt delay', 1000)
+    .option('--retry [retry]', 'retry receipt query', 60)
     .option('--send', 'send tx')
     .description('transfer value')
     .action(co.wrap(function* (to, value, opts) {
       init()
 
-      const wallet = eth.accounts.wallet[prog.use]
       const from = wallet.address
       if (!opts.gas) {
-        opts.gas = yield eth.estimateGas({
+        opts.gas = yield eth.estimateGasAsync({
           to: to
         })
       }
+
+      if (!opts.price) {
+        opts.price = yield eth.getGasPriceAsync()
+        opts.price += 1
+      }
+
       console.log(`${from} to ${to} ${value} wei gas:${opts.gas} gasPrice:${opts.price}`)
 
+      if (!opts.send) {
+        return
+      }
+
       const Tx = require('ethereumjs-tx');
-      let count = yield eth.getTransactionCount(from)
+      let count = yield eth.getTransactionCountAsync(from)
       var rawTx = {
-        nonce: web3.utils.toHex(opts.nonce || count),
-        gasPrice: web3.utils.toHex(opts.price),
-        gasLimit: web3.utils.toHex(opts.gas),
+        nonce: web3.toHex(opts.nonce || count),
+        gasPrice: web3.toHex(opts.price),
+        gasLimit: web3.toHex(opts.gas),
         to: to,
-        value: web3.utils.toHex(value),
+        value: web3.toHex(value),
         data: '0x'
       }
       const tx = new Tx(rawTx);
-      tx.sign(Buffer.from(wallet.privateKey.replace(/^0x/, ''), 'hex'));
+      tx.sign(wallet.getPrivateKey());
       const serializedTx = tx.serialize();
       const json = {}
       json['hash'] = '0x' + tx.hash().toString('hex')
-      json['nonce'] = web3.utils.hexToNumber('0x' + tx.nonce.toString('hex'))
-      json['gasLimit'] = web3.utils.hexToNumber('0x' + tx.gasLimit.toString('hex'))
-      json['gasPrice'] = web3.utils.hexToNumber('0x' + tx.gasPrice.toString('hex')).toString()
+      json['nonce'] = web3.toDecimal('0x' + tx.nonce.toString('hex'))
+      json['gasLimit'] = web3.toDecimal('0x' + tx.gasLimit.toString('hex'))
+      json['gasPrice'] = web3.toDecimal('0x' + tx.gasPrice.toString('hex'))
       json['input'] = '0x' + tx.input.toString('hex')
       json['to'] = '0x' + tx.to.toString('hex')
-      json['value'] = web3.utils.hexToNumber('0x' + tx.value.toString('hex')).toString()
+      json['value'] = web3.toDecimal('0x' + tx.value.toString('hex'))
       json['v'] = '0x' + tx.v.toString('hex')
       json['r'] = '0x' + tx.r.toString('hex')
       json['s'] = '0x' + tx.s.toString('hex')
@@ -191,49 +231,44 @@ module.exports = function (prog) {
         return;
       }
 
-      const result = yield eth.sendSignedTransaction('0x' + serializedTx.toString('hex'))
-      console.log(JSON.stringify(result, null, 4))
+      const hash = yield eth.sendRawTransactionAsync('0x' + serializedTx.toString('hex'))
+      console.log(hash)
+      if (!opts.wait) {
+        return
+      }
+      for (let i = 0; i < opts.retry; i++) {
+        const receipt = yield web3.eth.getTransactionReceiptAsync(hash)
+        if (!receipt) {
+          yield delay(opts.delay)
+          continue
+        }
+        console.log(JSON.stringify(receipt, null, 4))
+        return
+      }
+      console.error('wait timeout')
 
-      /*
-      const action = eth.sendTransaction({
-        from: from,
-        to: to,
-        gas: opts.gas,
-        gasPrice: opts.price,
-        value: value
-      })
-
-      action.on('transactionHash', function (hash) {
-          console.error(`hash: ${hash}`)
-        })
-        .on('receipt', function (receipt) {
-          console.log(receipt)
-        })
-        .on('confirmation', function (confirmationNumber, receipt) {})
-        .on('error', console.error)
-      const result = yield action
-      console.log(JSON.stringify(result, null, 4))
-      */
     }))
 
   prog
     .command('deploy <name> [args...]')
     .option('--value <value>', 'pay value wei', '0')
     .option('--gas <gasLimit>', 'gas limit', '')
-    .option('--price <gasPrice>', 'gas price', '100')
+    .option('--price <gasPrice>', 'gas price', '')
+    .option('--wait', 'wait receipt until block mine')
+    .option('--delay [delay]', 'retry receipt delay', 1000)
+    .option('--retry [retry]', 'retry receipt query', 60)
     .option('--send', 'send tx')
     .description('deploy one eth contract to network')
     .action(co.wrap(function* (name, args, opts) {
-      const contract = require('../contract')
-      if (!(name in contract)) {
+      const contracts = require('../lib/contracts')
+      if (!(name in contracts)) {
         console.error(`"${name}" contract not found`)
         return;
       }
       init()
 
-      const item = contract[name]
-      const abi = item.interface
-      const act = new web3.eth.Contract(abi);
+      const item = contracts[name]
+      const abi = item.abi
       let constructor
       for (const i of abi) {
         if (i.type === 'constructor') {
@@ -249,54 +284,104 @@ module.exports = function (prog) {
         return;
       }
 
-      const from = eth.accounts.wallet[prog.use].address
-      const value = (constructor.payable) ? opts.value : undefined
-      const deploy = act.deploy({
-        data: '0x' + item.bytecode,
-        arguments: args
+      //ref https://github.com/ethereum/web3.js/blob/1.0/packages/web3-eth-contract/src/index.js
+      //
+      const ethContract = require('web3-eth-contract')
+      const contract = new ethContract(item.abi)
+      const deploy = contract.deploy({
+        arguments: args,
+        data: item.binary.toString('hex')
       })
+      const data = deploy.encodeABI()
+
+      const from = wallet.address
+      const value = (constructor.payable) ? opts.value : 0
       if (!opts.gas) {
-        opts.gas = yield deploy.estimateGas({
-          from: from
+        opts.gas = yield eth.estimateGasAsync({
+          from: from,
+          value: value,
+          from: from,
+          data: data
         })
       }
+      if (!opts.price) {
+        opts.price = yield eth.getGasPriceAsync()
+        opts.price += 1
+      }
+
       console.log(`deploy "${name}" contract from:${from} ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
 
+      const Tx = require('ethereumjs-tx');
+      if (!opts.nonce) {
+        opts.nonce = yield eth.getTransactionCountAsync(from)
+      }
+      var rawTx = {
+        nonce: web3.toHex(opts.nonce),
+        gasPrice: web3.toHex(opts.price),
+        gasLimit: web3.toHex(opts.gas),
+        to: '0x',
+        value: web3.toHex(value),
+        data: data
+      }
+
+      console.log(rawTx)
+      const tx = new Tx(rawTx);
+      tx.sign(wallet.getPrivateKey());
+      const serializedTx = tx.serialize();
+      const json = {}
+      json['hash'] = '0x' + tx.hash().toString('hex')
+      json['nonce'] = web3.toDecimal('0x' + tx.nonce.toString('hex'))
+      json['gasLimit'] = web3.toDecimal('0x' + tx.gasLimit.toString('hex'))
+      json['gasPrice'] = web3.toDecimal('0x' + tx.gasPrice.toString('hex'))
+      json['to'] = '0x' + tx.to.toString('hex')
+      json['input'] = '0x' + tx.input.toString('hex')
+      json['value'] = (tx.value.length) ? web3.toDecimal('0x' + tx.value.toString('hex')) : 0
+      json['v'] = '0x' + tx.v.toString('hex')
+      json['r'] = '0x' + tx.r.toString('hex')
+      json['s'] = '0x' + tx.s.toString('hex')
+      console.log(json)
       if (!opts.send) {
         return;
       }
 
-      const tx = yield deploy.send({
-        from: from,
-        value: value,
-        gas: opts.gas,
-        gasPrice: opts.price
-      }).catch(function (err) {
-        console.log(err)
-      })
-
-      console.log(tx)
+      const hash = yield eth.sendRawTransactionAsync('0x' + serializedTx.toString('hex'))
+      console.log(hash)
+      if (!opts.wait) {
+        return
+      }
+      for (let i = 0; i < opts.retry; i++) {
+        const receipt = yield web3.eth.getTransactionReceiptAsync(hash)
+        if (!receipt) {
+          yield delay(opts.delay)
+          continue
+        }
+        console.log(JSON.stringify(receipt, null, 4))
+        return
+      }
+      console.error('wait timeout')
 
     }))
 
   prog
-    .command('call <at> <name> <method> [args...]')
-    .option('--value <value>', 'pay value wei', "0")
+    .command('call <name> <at> <method> [args...]')
+    .option('--value <value>', 'pay value wei', '0')
     .option('--gas <gasLimit>', 'gas limit', '')
-    .option('--price <gasPrice>', 'gas price', '100')
+    .option('--price <gasPrice>', 'gas price', '')
+    .option('--wait', 'wait receipt until block mine')
+    .option('--delay [delay]', 'retry receipt delay', 1000)
+    .option('--retry [retry]', 'retry receipt query', 60)
     .option('--send', 'send tx')
     .description('call one eth contract method')
-    .action(co.wrap(function* (at, name, methodName, args, opts) {
-      const contract = require('../contract')
-      if (!(name in contract)) {
+    .action(co.wrap(function* (name, at, methodName, args, opts) {
+      const contracts = require('../lib/contracts')
+      if (!(name in contracts)) {
         console.error(`"${name}" contract not found`)
         return;
       }
       init()
 
-      const item = contract[name]
-      const abi = item.interface
-      const act = new web3.eth.Contract(abi, at);
+      const item = contracts[name]
+      const abi = item.abi
       let method
       for (const i of abi) {
         if (i.type === 'function' && i.name === methodName) {
@@ -316,25 +401,35 @@ module.exports = function (prog) {
         return;
       }
 
-      const from = eth.accounts.wallet[prog.use].address
-      const value = (constructor.payable) ? opts.value : undefined
-      const func = act.methods[methodName].apply(null, args)
+      const from = wallet.address
+      const value = (constructor.payable) ? opts.value : 0
+
+      const ethContract = require('web3-eth-contract')
+      const contract = new ethContract(item.abi, at)
+      const func = contract.methods[methodName].apply(null, args)
+      const data = func.encodeABI()
 
       if (!opts.gas) {
-        opts.gas = yield func.estimateGas({
-          from: from
+        opts.gas = yield eth.estimateGasAsync({
+          from: from,
+          value: value,
+          data: data
         })
       }
-      if (opts.price) {
-        opts.price = yield eth.getGasPrice()
+
+      if (!opts.price) {
+        opts.price = yield eth.getGasPriceAsync()
+        opts.price += 1
       }
 
       console.error(`"${name}" contract at:${from} call method "${methodName}" ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
 
       if (!opts.send) {
-        const result = yield func.call({
+        const result = yield eth.callAsync({
           from: from,
+          to: at,
           value: value,
+          data: data,
           gas: opts.gas,
           gasPrice: opts.price
         }).catch(function (err) {
@@ -345,48 +440,52 @@ module.exports = function (prog) {
         return;
       }
 
-      const wallet = eth.accounts.wallet[from]
-      let nonce = yield eth.getTransactionCount(from)
       const Tx = require('ethereumjs-tx');
-      let data = func.encodeABI()
+      if (!opts.nonce) {
+        opts.nonce = yield eth.getTransactionCountAsync(from)
+      }
       var rawTx = {
-        nonce: web3.utils.toHex(nonce),
-        gasPrice: web3.utils.toHex(opts.price),
-        gasLimit: web3.utils.toHex(opts.gas),
+        nonce: web3.toHex(opts.nonce),
+        gasPrice: web3.toHex(opts.price),
+        gasLimit: web3.toHex(opts.gas),
         to: at,
-        value: web3.utils.toHex(value),
+        value: web3.toHex(value),
         data: data
       }
+
+      console.log(rawTx)
       const tx = new Tx(rawTx);
-      tx.sign(Buffer.from(wallet.privateKey.replace(/^0x/, ''), 'hex'));
+      tx.sign(wallet.getPrivateKey());
       const serializedTx = tx.serialize();
       const json = {}
       json['hash'] = '0x' + tx.hash().toString('hex')
-      json['nonce'] = web3.utils.hexToNumber('0x' + tx.nonce.toString('hex'))
-      json['gasLimit'] = web3.utils.hexToNumber('0x' + tx.gasLimit.toString('hex'))
-      json['gasPrice'] = web3.utils.hexToNumber('0x' + tx.gasPrice.toString('hex')).toString()
-      json['input'] = '0x' + tx.input.toString('hex')
+      json['nonce'] = web3.toDecimal('0x' + tx.nonce.toString('hex'))
+      json['gasLimit'] = web3.toDecimal('0x' + tx.gasLimit.toString('hex'))
+      json['gasPrice'] = web3.toDecimal('0x' + tx.gasPrice.toString('hex'))
       json['to'] = '0x' + tx.to.toString('hex')
-      json['value'] = web3.utils.hexToNumber('0x' + tx.value.toString('hex')).toString()
+      json['input'] = '0x' + tx.input.toString('hex')
+      json['value'] = (tx.value.length) ? web3.toDecimal('0x' + tx.value.toString('hex')) : 0
       json['v'] = '0x' + tx.v.toString('hex')
       json['r'] = '0x' + tx.r.toString('hex')
       json['s'] = '0x' + tx.s.toString('hex')
       console.log(json)
 
-      const result = yield eth.sendSignedTransaction('0x' + serializedTx.toString('hex'))
-      console.log(JSON.stringify(result, null, 4))
+      const hash = yield eth.sendRawTransactionAsync('0x' + serializedTx.toString('hex'))
+      console.log(hash)
+      if (!opts.wait) {
+        return
+      }
+      for (let i = 0; i < opts.retry; i++) {
+        const receipt = yield web3.eth.getTransactionReceiptAsync(hash)
+        if (!receipt) {
+          yield delay(opts.delay)
+          continue
+        }
+        console.log(JSON.stringify(receipt, null, 4))
+        return
+      }
+      console.error('wait timeout')
 
-      /*
-      const result = yield func.send({
-        from: from,
-        value: value,
-        gas: opts.gas,
-        gasPrice: opts.price
-      }).catch(function (err) {
-        console.log(err)
-      })
-      console.log(result)
-*/
     }))
 
 }
