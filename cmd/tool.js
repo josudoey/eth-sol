@@ -546,20 +546,14 @@ module.exports = function (prog) {
     .description('get log')
     .action(co.wrap(function* (address, opts) {
       initForWeb3()
+      const Query = require('../lib/query/get-logs')
       const providerUrl = prog.rpcapi
-      const body = {
-        "jsonrpc": "2.0",
-        "method": "eth_getLogs",
-        "params": [{
-          "fromBlock": isNaN(opts.from) ? opts.from : web3.toHex(opts.from),
-          "toBlock": isNaN(opts.to) ? opts.to : web3.toHex(opts.to),
-          "address": address.toLowerCase(),
-          "topics": []
-        }],
-        id: Date.now()
-      }
-
-      var options = {
+      const body = Query({
+        from: opts.from,
+        to: opts.to,
+        address: address
+      })
+      const options = {
         method: 'POST',
         uri: providerUrl,
         body: body,
@@ -567,35 +561,28 @@ module.exports = function (prog) {
       };
 
       const contracts = require('../lib/contracts')
-      let contract = contracts[opts.contract]
-      if (!contract) {
-        contract = {
-          events: {}
-        }
-      }
-      const SolidityEvent = require("web3/lib/web3/event.js");
-
+      const contract = contracts[opts.contract]
+      const Parser = require('../lib/eventlog-parser')
+      const parser = Parser(contract)
       const resp = yield rp(options)
       for (const log of resp.result) {
-        var logABI = contract.events[log.topics[0]];
-        if (!logABI) {
+        const e = parser.parse(log)
+        if (!e) {
           console.log(JSON.stringify(log, null, 4))
           continue;
         }
 
-        var decoder = new SolidityEvent(null, logABI, log.address);
-        const e = decoder.decode(log);
         const blockNumber = e.blockNumber
         const eventName = e.event
+        const tx = e.transactionHash
+        const logIndex = e.logIndex
         const args = e.args
-        let item = `${blockNumber} ${eventName}`
-        const inputs = logABI.inputs.map(function (input) {
-          const name = input.name
+        let item = `#${blockNumber}@${logIndex} ${tx} ${eventName}`
+        Object.keys(e.args).forEach(function (name) {
           const val = args[name]
           item += ` ${name}:${val.toString()}`
         })
         console.log(item)
-
       }
 
     }))
@@ -603,74 +590,64 @@ module.exports = function (prog) {
   prog
     .command('watch <address>')
     .option('--contract <contractName>', 'for event decode')
+    .option('--from <from>', 'integer block number')
     .description('watch ')
     .action(co.wrap(function* (address, opts) {
       initForWeb3()
-      const ProviderEngine = require("web3-provider-engine");
-      const Web3Subprovider = require("web3-provider-engine/subproviders/web3.js");
       const providerUrl = prog.rpcapi
-      let lastHeight = null
-      const engine = new ProviderEngine();
-      engine.addProvider(new Web3Subprovider(new Web3.providers.HttpProvider(providerUrl)));
-      engine.on('block', co.wrap(function* (block) {
-        console.log('BLOCK CHANGED:', '#' + web3.toDecimal('0x' + block.number.toString('hex')), '0x' + block.hash.toString('hex'))
 
-        if (!lastHeight) {
-          lastHeight = '0x' + block.number.toString('hex')
-          return;
-        }
+      const Query = require('../lib/query/get-logs')
+      const contracts = require('../lib/contracts')
+      let contract = contracts[opts.contract]
+      const Parser = require('../lib/eventlog-parser')
+      const parser = Parser(contract)
 
-        lastHeight = '0x' + block.number.toString('hex')
-        const body = {
-          "jsonrpc": "2.0",
-          "method": "eth_getLogs",
-          "params": [{
-            "fromBlock": lastHeight,
-            "toBlock": "latest",
-            "address": address.toLowerCase(),
-            "topics": []
-          }],
-          id: Date.now()
-        }
-
-        var options = {
+      const reqLog = co.wrap(function* (address, from, to) {
+        const body = Query({
+          from: from,
+          to: to,
+          address: address
+        })
+        const options = {
           method: 'POST',
           uri: providerUrl,
           body: body,
-          json: true // Automatically stringifies the body to JSON
+          json: true
         };
-
-        const contracts = require('../lib/contracts')
-        let contract = contracts[opts.contract]
-        if (!contract) {
-          contract = {
-            events: {}
-          }
-        }
-        const SolidityEvent = require("web3/lib/web3/event.js");
 
         const resp = yield rp(options)
         for (const log of resp.result) {
-          var logABI = contract.events[log.topics[0]];
-          if (!logABI) {
+          const e = parser.parse(log)
+          if (!e) {
             console.log(JSON.stringify(log, null, 4))
             continue;
           }
 
-          var decoder = new SolidityEvent(null, logABI, log.address);
-          const e = decoder.decode(log);
           const blockNumber = e.blockNumber
           const eventName = e.event
+          const tx = e.transactionHash
+          const logIndex = e.logIndex
           const args = e.args
-          let item = `${blockNumber} ${eventName}`
-          const inputs = logABI.inputs.map(function (input) {
-            const name = input.name
+          let item = `#${blockNumber}@${logIndex} ${tx} ${eventName}`
+          Object.keys(e.args).forEach(function (name) {
             const val = args[name]
             item += ` ${name}:${val.toString()}`
           })
           console.log(item)
-
         }
+      })
+
+      let first = true;
+      const engine = require('../lib/block-watcher')(providerUrl);
+      engine.on('block', co.wrap(function* (block) {
+        let blockNumber = '0x' + block.number.toString('hex')
+        console.log('BLOCK CHANGED:', '#' + web3.toDecimal(blockNumber), blockNumber)
+        if (first && opts.from) {
+          first = false
+          yield reqLog(address, opts.from, blockNumber)
+          return
+        }
+        reqLog(address, blockNumber)
       }))
       engine.start()
     }))
