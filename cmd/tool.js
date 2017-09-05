@@ -20,7 +20,7 @@ module.exports = function (prog) {
   prog.option('--rpcapi <url>', 'use HTTP-RPC interface (env["RPCAPI"] or defualt: "http://localhost:8545")', env.RPCAPI || "http://localhost:8545")
   prog.option('--password <password>', 'use HTTP-RPC interface (env["PASSWORD"] or defualt: "")', env.PASSWORD || "")
   prog.option('--wallet <path>', 'wallet file path(env["WALLET"] or defualt: "./.wallet")', env.PASSWORD || path.resolve(__dirname + '/../.wallet'))
-  prog.option('--index <index>', 'wallet use index default: 0')
+  prog.option('--index <index>', 'wallet use index (env["INDEX"] or default: 0)', env.INDEX || 0)
 
   let web3, eth, wallet, mnemonic
   const getNewPassword = function () {
@@ -118,6 +118,14 @@ module.exports = function (prog) {
     }))
 
   prog
+    .command('private')
+    .description('show wallet private key')
+    .action(co.wrap(function* (opts) {
+      initForWallet()
+      console.log(wallet.privKey.toString('hex'))
+    }))
+
+  prog
     .command('show [name] [args...]')
     .description('show contract method')
     .action(co.wrap(function* (name, args, opts) {
@@ -191,7 +199,7 @@ module.exports = function (prog) {
         const e = decoder.decode(log);
         const eventName = e.event
         const args = e.args
-        let item = `${e.logIndex} ${eventName}`
+        let item = `${eventName}`
         const inputs = logABI.inputs.map(function (input) {
           const name = input.name
           const val = args[name]
@@ -339,6 +347,7 @@ module.exports = function (prog) {
           data: data
         })
       }
+
       if (!opts.price) {
         opts.price = yield eth.getGasPriceAsync()
         opts.price += 1
@@ -365,7 +374,7 @@ module.exports = function (prog) {
       const serializedTx = tx.serialize();
       const json = {}
       json['hash'] = '0x' + tx.hash().toString('hex')
-      json['nonce'] = web3.toDecimal('0x' + tx.nonce.toString('hex'))
+      json['nonce'] = web3.toDecimal('0x' + (tx.nonce.toString('hex') || "00"))
       json['gasLimit'] = web3.toDecimal('0x' + tx.gasLimit.toString('hex'))
       json['gasPrice'] = web3.toDecimal('0x' + tx.gasPrice.toString('hex'))
       json['to'] = '0x' + tx.to.toString('hex')
@@ -384,6 +393,7 @@ module.exports = function (prog) {
       if (!opts.wait) {
         return
       }
+
       for (let i = 0; i < opts.retry; i++) {
         const receipt = yield web3.eth.getTransactionReceiptAsync(hash)
         if (!receipt) {
@@ -663,8 +673,6 @@ module.exports = function (prog) {
         }
       }))
       engine.start()
-
     }))
-
 }
 
