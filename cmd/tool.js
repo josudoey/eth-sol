@@ -563,7 +563,7 @@ module.exports = function (prog) {
       const contracts = require('../lib/contracts')
       const contract = contracts[opts.contract]
       const Parser = require('../lib/eventlog-parser')
-      const parser = Parser(contract)
+      const parser = Parser(contract.abi)
       const resp = yield rp(options)
       for (const log of resp.result) {
         const e = parser.parse(log)
@@ -600,7 +600,7 @@ module.exports = function (prog) {
       const contracts = require('../lib/contracts')
       let contract = contracts[opts.contract]
       const Parser = require('../lib/eventlog-parser')
-      const parser = Parser(contract)
+      const parser = Parser(contract.abi)
 
       const reqLog = co.wrap(function* (address, from, to) {
         const body = Query({
