@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const env = process.env
 const Web3 = require('web3')
+const utils = require('web3/lib/utils/utils')
 const co = require('co')
 const delay = require('delay')
 const sjcl = require('sjcl')
@@ -15,11 +16,8 @@ const prompt = require('prompt-sync')({
 });
 
 module.exports = function (prog) {
-  prog.option('--keystore <keystote>', 'keystore path default: ./keystote', __dirname + "/../keystore")
-  prog.option('--use <address>', 'use wallet address (env["ETHERBASE"] or defualt: "0")', env.ETHERBASE || '0')
   prog.option('--rpcapi <url>', 'use HTTP-RPC interface (env["RPCAPI"] or defualt: "http://localhost:8545")', env.RPCAPI || "http://localhost:8545")
-  prog.option('--password <password>', 'use HTTP-RPC interface (env["PASSWORD"] or defualt: "")', env.PASSWORD || "")
-  prog.option('--wallet <path>', 'wallet file path(env["WALLET"] or defualt: "./.wallet")', env.PASSWORD || path.resolve(__dirname + '/../.wallet'))
+  prog.option('--wallet <path>', 'wallet file path(env["WALLET"] or defualt: "./.wallet")', env.WALLET || path.resolve(__dirname + '/../.wallet'))
   prog.option('--index <index>', 'wallet use index (env["INDEX"] or default: 0)', env.INDEX || 0)
 
   let web3, eth, wallet, mnemonic
@@ -83,6 +81,29 @@ module.exports = function (prog) {
     initForWeb3()
     initForWallet()
   }
+
+  prog
+    .command('wei <amount> [unit]')
+    .description('show wei')
+    .action(co.wrap(function* (amount, unit, opts) {
+      console.log(utils.toWei(amount, unit))
+    }))
+
+  prog
+    .command('keystore-private <keystore-file-path>')
+    .description('show keystore key')
+    .action(co.wrap(function* (keystoreFilePath, opts) {
+      const keythereum = require("keythereum");
+
+      const password = prompt('enter password: ', {
+        echo: '*'
+      })
+      const keyObject = JSON.parse(fs.readFileSync(keystoreFilePath))
+
+      const privateKey = keythereum.recover(password, keyObject)
+      console.log(privateKey.toString('hex'))
+
+    }))
 
   prog
     .command('mnemonic')
