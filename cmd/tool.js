@@ -641,13 +641,14 @@ module.exports = function (prog) {
         const e = parser.parse(log)
         if (!e) {
           console.log(JSON.stringify(log, null, 4))
+          return;
         }
         const blockNumber = utils.toDecimal(e.blockNumber)
         const eventName = e.event
         const tx = e.transactionHash
         const logIndex = utils.toDecimal(e.logIndex)
         const args = e.args
-        let item = `#${blockNumber}@${logIndex} ${tx} ${eventName}`
+        let item = `#${blockNumber} @${logIndex} ${tx} ${eventName}`
         e.abi.inputs.forEach(function (input) {
           const name = input.name
           const val = args[name]
@@ -656,7 +657,7 @@ module.exports = function (prog) {
         console.log(item)
       })
       watcher.on('block', function (blockNumber) {
-        console.log('block #', blockNumber)
+        console.log(`block #${blockNumber}`)
       })
       watcher.start()
     })
