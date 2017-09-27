@@ -609,68 +609,39 @@ module.exports = function (prog) {
     }))
 
   prog
-    .command('watch <address>')
+    .command('watch [address]')
     .option('--contract <contractName>', 'for event decode')
     .option('--from <from>', 'integer block number')
     .description('watch ')
-    .action(co.wrap(function* (address, opts) {
-      initForWeb3()
-      const providerUrl = prog.rpcapi
+    .action(function (address, opts) {
 
-      const Query = require('../lib/query/get-logs')
       const contracts = require('../lib/contracts')
-      let contract = contracts[opts.contract]
+      const names = Object.keys(contracts)
       const Parser = require('../lib/eventlog-parser')
-      const parser = Parser(contract.abi)
+      const parser = Parser()
+      for (const name of names) {
+        let contract = contracts[name]
+        parser.append(contract.abi)
+      }
 
-      const reqLog = co.wrap(function* (address, from, to) {
-        const body = Query({
-          from: from,
-          to: to,
-          address: address
-        })
-        const options = {
-          method: 'POST',
-          uri: providerUrl,
-          body: body,
-          json: true
-        };
-
-        const resp = yield rp(options)
-        for (const log of resp.result) {
-          const e = parser.parse(log)
-          if (!e) {
-            console.log(JSON.stringify(log, null, 4))
-            continue;
-          }
-
-          const blockNumber = e.blockNumber
-          const eventName = e.event
-          const tx = e.transactionHash
-          const logIndex = e.logIndex
-          const args = e.args
-          let item = `#${blockNumber}@${logIndex} ${tx} ${eventName}`
-          Object.keys(e.args).forEach(function (name) {
-            const val = args[name]
-            item += ` ${name}:${val.toString()}`
-          })
-          console.log(item)
-        }
+      const watcher = require('../lib/log-watcher')({
+        from: opts.from,
+        address: address,
+        rpcapi: prog.rpcapi
       })
 
-      let first = true;
-      const engine = require('../lib/block-watcher')(providerUrl);
-      engine.on('block', co.wrap(function* (block) {
-        let blockNumber = '0x' + block.number.toString('hex')
-        console.log('BLOCK CHANGED:', '#' + web3.toDecimal(blockNumber), blockNumber)
-        if (first && opts.from) {
-          first = false
-          yield reqLog(address, opts.from, blockNumber)
+      watcher.on('log', function (log) {
+        const e = parser.parse(log)
+        if (e) {
+          console.log(e.event, e.event.args)
           return
         }
-        reqLog(address, blockNumber)
-      }))
-      engine.start()
-    }))
+        console.log(log)
+      })
+      watcher.on('block', function (blockNumber) {
+        console.log('block #', blockNumber)
+      })
+      watcher.start()
+    })
 }
 
