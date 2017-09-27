@@ -90,6 +90,13 @@ module.exports = function (prog) {
     }))
 
   prog
+    .command('ether <wei>')
+    .description('show ether from wei')
+    .action(co.wrap(function* (amount, opts) {
+      console.log(utils.fromWei(amount, 'ether'))
+    }))
+
+  prog
     .command('keystore-private <keystore-file-path>')
     .description('show keystore key')
     .action(co.wrap(function* (keystoreFilePath, opts) {
