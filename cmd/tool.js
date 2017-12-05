@@ -206,7 +206,10 @@ module.exports = function (prog) {
     .action(co.wrap(function* (hash, opts) {
       initForWeb3()
 
-      const result = yield eth.getTransactionReceiptAsync(hash)
+      let result = yield eth.getTransactionAsync(hash)
+      console.log(JSON.stringify(result, null, 4))
+
+      result = yield eth.getTransactionReceiptAsync(hash)
       console.log(JSON.stringify(result, null, 4))
       if (!opts.contract) {
         return
