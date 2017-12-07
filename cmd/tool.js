@@ -53,7 +53,7 @@ module.exports = function (prog) {
     if (!exists) {
       mnemonic = prompt('input seed mnemonic word [empty is random]:')
       if (!mnemonic) {
-        mnemonic = bip39.generateMnemonic()
+        mnemonic = bip39.generateMnemonic(256)
       }
       const password = getNewPassword()
       const ciphertext = sjcl.encrypt(password, mnemonic)
@@ -80,6 +80,25 @@ module.exports = function (prog) {
   const init = function () {
     initForWeb3()
     initForWallet()
+  }
+
+  const showMethod = function (i) {
+    i.inputs = i.inputs || []
+    const display = i.inputs.map(function (o) {
+      return `${o.type} ${o.name}`
+    }).join(", ")
+
+    let methodName = (i.name) ? ` ${i.name}` : ""
+    let returns = ""
+    let hasConstant = (i.constant) ? " constant" : ""
+    let hasPayable = (i.payable) ? " payable" : ""
+    if (i.type === 'function' && i.outputs.length) {
+      const display = i.outputs.map(function (o) {
+        return `${o.type} ${o.name}`
+      }).join(", ")
+      returns = ` returns (${display})`
+    }
+    console.log(`${i.type}${hasPayable}${methodName}(${display})${hasConstant}${returns};`)
   }
 
   prog
@@ -240,6 +259,70 @@ module.exports = function (prog) {
       }
     }))
 
+  const transfer = async function (opts) {
+    init()
+    const from = wallet.address
+    const to = opts.to || ''
+    const value = opts.value || '0'
+    const data = opts.data || '0x'
+    if (!opts.gas) {
+      opts.gas = await eth.estimateGasAsync({
+        to: to,
+        value: web3.toHex(value),
+        data: data
+      })
+    }
+
+    if (!opts.price) {
+      opts.price = await eth.getGasPriceAsync()
+      opts.price += 1
+    }
+
+    console.log(`${from} to ${to} ${value} wei gas:${opts.gas} gasPrice:${opts.price}`)
+
+    const Tx = require('ethereumjs-tx');
+    let count = await eth.getTransactionCountAsync(from)
+    var rawTx = {
+      nonce: web3.toHex(opts.nonce || count),
+      gasPrice: web3.toHex(opts.price),
+      gasLimit: web3.toHex(opts.gas),
+      to: to,
+      value: web3.toHex(value),
+      data: data
+    }
+    const tx = new Tx(rawTx);
+    tx.sign(wallet.getPrivateKey());
+    const serializedTx = tx.serialize();
+    const json = {}
+    json['hash'] = '0x' + tx.hash().toString('hex')
+    json['nonce'] = web3.toDecimal('0x' + tx.nonce.toString('hex'))
+    json['gasLimit'] = web3.toDecimal('0x' + tx.gasLimit.toString('hex'))
+    json['gasPrice'] = web3.toDecimal('0x' + tx.gasPrice.toString('hex'))
+    json['input'] = '0x' + tx.input.toString('hex')
+    json['to'] = '0x' + tx.to.toString('hex')
+    json['value'] = tx.value.length && web3.toDecimal('0x' + tx.value.toString('hex'))
+    json['v'] = '0x' + tx.v.toString('hex')
+    json['r'] = '0x' + tx.r.toString('hex')
+    json['s'] = '0x' + tx.s.toString('hex')
+    console.log(json)
+
+    const hash = await eth.sendRawTransactionAsync('0x' + serializedTx.toString('hex'))
+    console.log(hash)
+    if (!opts.wait) {
+      return
+    }
+    for (let i = 0; i < opts.retry; i++) {
+      const receipt = await web3.eth.getTransactionReceiptAsync(hash)
+      if (!receipt) {
+        await await (opts.delay)
+        continue
+      }
+      console.log(JSON.stringify(receipt, null, 4))
+      return
+    }
+    console.error('wait timeout')
+  }
+
   prog
     .command('transfer <to> <wei>')
     .option('--gas <gasLimit>', 'gas limit')
@@ -384,7 +467,7 @@ module.exports = function (prog) {
         opts.price += 1
       }
 
-      console.log(`deploy "${name}" contract from:${from} ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
+      console.log(`deploy "${name}" contract from:${from} ${(value) ? "value:" + value + " " : ""}gas:${opts.gas} price:${opts.price}`)
 
       const Tx = require('ethereumjs-tx');
       if (!opts.nonce) {
@@ -499,7 +582,7 @@ module.exports = function (prog) {
         opts.price += 1
       }
 
-      console.error(`"${name}" contract at:${at} call method "${methodName}" ${(value)?"value:"+value+" ":""}gas:${opts.gas} price:${opts.price}`)
+      console.error(`"${name}" contract at:${at} call method "${methodName}" ${(value) ? "value:" + value + " " : ""}gas:${opts.gas} price:${opts.price}`)
 
       if (!opts.send) {
         const SolidityFunction = require("web3/lib/web3/function.js");
@@ -663,6 +746,169 @@ module.exports = function (prog) {
         console.log(`block #${blockNumber}`)
       })
       watcher.start()
+    })
+
+  prog
+    .command('contract [name] [method] [args...]')
+    .description('show contract struct')
+    .action(async function (name, methodName, args, opts) {
+      const contracts = require('../lib/contract')
+      if (!name) {
+        for (const key of Object.keys(contracts)) {
+          console.log(key)
+        }
+        return
+      }
+
+      const showMethod = function (i) {
+        i.inputs = i.inputs || []
+        const display = i.inputs.map(function (o) {
+          return `${o.type} ${o.name}`
+        }).join(", ")
+
+        let methodName = (i.name) ? ` ${i.name}` : ""
+        let returns = ""
+        let hasConstant = (i.constant) ? " constant" : ""
+        let hasPayable = (i.payable) ? " payable" : ""
+        if (i.type === 'function' && i.outputs.length) {
+          const display = i.outputs.map(function (o) {
+            return `${o.type} ${o.name}`
+          }).join(", ")
+          returns = ` returns (${display})`
+        }
+        console.log(`${i.type}${hasPayable}${methodName}(${display})${hasConstant}${returns};`)
+      }
+      const contract = contracts[name]
+      if (!contract) {
+        console.error('contract not found')
+        return
+      }
+
+      if (!methodName) {
+        for (const i of contract) {
+          showMethod(i)
+        }
+        return
+      }
+
+      const method = contract[methodName]
+      if (!method) {
+        console.error('method not found')
+        return
+      }
+
+      args = args || []
+      try {
+        const code = method.apply(null, args)
+        console.log(code)
+      } catch (e) {
+        console.error(e.message)
+        showMethod(method)
+        process.exit(-1)
+      }
+
+    })
+
+  prog
+    .command('contract-deploy <name> [args...]')
+    .option('--value <value>', 'pay value wei', '0')
+    .option('--gas <gasLimit>', 'gas limit', '')
+    .option('--price <gasPrice>', 'gas price', '')
+    .option('--wait', 'wait receipt until block mine')
+    .option('--delay [delay]', 'retry receipt delay', 1000)
+    .option('--retry [retry]', 'retry receipt query', 60)
+    .description('contract deploy')
+    .action(async function (name, args, opts) {
+      const contracts = require('../lib/contract')
+      if (!name) {
+        for (const key of Object.keys(contracts)) {
+          console.log(key)
+        }
+        return
+      }
+
+      const showMethod = function (i) {
+        i.inputs = i.inputs || []
+        const display = i.inputs.map(function (o) {
+          return `${o.type} ${o.name}`
+        }).join(", ")
+
+        let methodName = (i.name) ? ` ${i.name}` : ""
+        let returns = ""
+        let hasConstant = (i.constant) ? " constant" : ""
+        let hasPayable = (i.payable) ? " payable" : ""
+        if (i.type === 'function' && i.outputs.length) {
+          const display = i.outputs.map(function (o) {
+            return `${o.type} ${o.name}`
+          }).join(", ")
+          returns = ` returns (${display})`
+        }
+        console.log(`${i.type}${hasPayable}${methodName}(${display})${hasConstant}${returns};`)
+      }
+      const contract = contracts[name]
+      if (!contract) {
+        console.error('contract not found')
+        return
+      }
+      args = args || []
+      opts.data = contract.constructor.apply(null, args)
+      await transfer(opts)
+
+    })
+
+  prog
+    .command('contract-call <at> <name> [method] [args...]')
+    .description('show contract method')
+    .action(async function (at, name, methodName, args, opts) {
+
+      initForWeb3()
+
+      const contracts = require('../lib/contract')
+      if (!name) {
+        for (const key of Object.keys(contracts)) {
+          console.log(key)
+        }
+        return
+      }
+
+      const contract = contracts[name]
+      if (!contract) {
+        console.error('contract not found')
+        return
+      }
+
+      const method = contract[methodName]
+      if (!method) {
+        console.error('method not found')
+        return
+      }
+
+      args = args || []
+      try {
+        opts.data = method.apply(null, args)
+        opts.to = at
+      } catch (e) {
+        console.error(e.message)
+        showMethod(method)
+        process.exit(-1)
+      }
+
+      const returns = await eth.callAsync(opts)
+      console.log(returns)
+
+    })
+
+  prog
+    .command('contract-send <name> <action>')
+    .option('--value <value>', 'pay value wei', '0')
+    .option('--gas <gasLimit>', 'gas limit', '')
+    .option('--price <gasPrice>', 'gas price', '')
+    .option('--wait', 'wait receipt until block mine')
+    .option('--delay [delay]', 'retry receipt delay', 1000)
+    .option('--retry [retry]', 'retry receipt query', 60)
+    .description('show contract method')
+    .action(async function (name, action, opts) {
+      console.log('contract-send')
     })
 }
 
