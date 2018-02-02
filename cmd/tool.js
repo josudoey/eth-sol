@@ -152,6 +152,14 @@ module.exports = function (prog) {
     }))
 
   prog
+    .command('address')
+    .description('show address')
+    .action(co.wrap(function* (opts) {
+      initForWallet()
+      console.log(`${wallet.address}`)
+    }))
+
+  prog
     .command('balance [address]')
     .description('query wallet balance')
     .action(co.wrap(function* (address, opts) {
@@ -171,6 +179,46 @@ module.exports = function (prog) {
       initForWallet()
       console.log(wallet.privKey.toString('hex'))
     }))
+
+
+  prog
+    .command('sign <msg>')
+    .description('sign msg')
+    .action(async function (msg, opts) {
+      //ref https://github.com/ethereumjs/ethereumjs-util/blob/master/docs/index.md#ecsign
+      initForWallet()
+      wallet.privKey
+      const util = require('ethereumjs-util')
+      const privKey = wallet.privKey
+      const h = util.sha3(msg)
+      const hash = h.toString('hex')
+      const signature = util.ecsign(h, privKey)
+      console.log(`0x${hash}`)
+      const r = signature.r.toString('hex')
+      const s = signature.s.toString('hex')
+      const v = signature.v.toString('hex')
+      console.log(`0x${r}${s}${v}`)
+    })
+
+  prog
+    .command('ecrecover <msg> <signature>')
+    .description('msg')
+    .action(async function (msg, signature, opts) {
+      //ref https://github.com/ethereumjs/ethereumjs-util/blob/master/docs/index.md#ecrecover
+      //ref https://github.com/ethereum/wiki/wiki/JavaScript-API#web3ethsign
+
+      const Wallet = require('ethereumjs-wallet')
+      const util = require('ethereumjs-util')
+      const h = util.sha3(msg)
+      signature = signature.replace(/^0x/, '')
+      const r = Buffer.from(signature.slice(0, 64), 'hex')
+      const s = Buffer.from(signature.slice(64, 128), 'hex')
+      const v = Buffer.from(signature.slice(128, 130), 'hex')
+      const pubKey = util.ecrecover(h, v[0], r, s)
+      const wallet = Wallet.fromPublicKey(pubKey)
+      const address = '0x' + wallet.getAddress().toString('hex')
+      console.log(address)
+    })
 
   prog
     .command('show [name] [args...]')

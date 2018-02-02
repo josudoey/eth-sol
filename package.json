@@ -27,7 +27,6 @@
   "homepage": "https://github.com/josudoey/eth-sol#readme",
   "dependencies": {
     "bip39": "^2.4.0",
-    "bluebird": "^3.5.0",
     "camelcase": "^4.1.0",
     "co": "^4.6.0",
     "commander": "^2.11.0",
@@ -43,17 +42,14 @@
     "keythereum": "^1.0.2",
     "mocha": "^3.5.0",
     "once": "^1.4.0",
-    "promise4solo": "^1.0.3",
     "prompt-sync": "^4.1.5",
     "request-promise": "^4.2.1",
     "sjcl": "^1.0.7",
-    "truffle-contract": "^2.0.5",
-    "web": "0.0.2",
     "web3": "^0.20.1",
-    "web3-eth-contract": "^1.0.0-beta.18",
     "web3-provider-engine": "^13.2.9"
   },
   "devDependencies": {
+    "ethereumjs-util": "^5.1.3",
     "intelli-espower-loader": "^1.0.1",
     "mkdirp": "^0.5.1",
     "power-assert": "^1.4.4",
