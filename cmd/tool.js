@@ -187,7 +187,6 @@ module.exports = function (prog) {
     .action(async function (msg, opts) {
       //ref https://github.com/ethereumjs/ethereumjs-util/blob/master/docs/index.md#ecsign
       initForWallet()
-      wallet.privKey
       const util = require('ethereumjs-util')
       const privKey = wallet.privKey
       const h = util.sha3(msg)
@@ -196,13 +195,14 @@ module.exports = function (prog) {
       console.log(`0x${hash}`)
       const r = signature.r.toString('hex')
       const s = signature.s.toString('hex')
-      const v = signature.v.toString('hex')
+      const v = Buffer.from([signature.v]).toString('hex')
+
       console.log(`0x${r}${s}${v}`)
     })
 
   prog
     .command('ecrecover <msg> <signature>')
-    .description('msg')
+    .description('ecrecover address')
     .action(async function (msg, signature, opts) {
       //ref https://github.com/ethereumjs/ethereumjs-util/blob/master/docs/index.md#ecrecover
       //ref https://github.com/ethereum/wiki/wiki/JavaScript-API#web3ethsign
@@ -218,6 +218,34 @@ module.exports = function (prog) {
       const wallet = Wallet.fromPublicKey(pubKey)
       const address = '0x' + wallet.getAddress().toString('hex')
       console.log(address)
+    })
+
+
+  prog
+    .command('personal-sign <msg>')
+    .description('personal sign msg')
+    .action(async function (msg, opts) {
+      //ref https://github.com/MetaMask/eth-sig-util
+      initForWallet()
+      const util = require('eth-sig-util')
+      const web3 = new Web3()
+      const privKey = wallet.privKey
+      const signature = util.personalSign(privKey, { data: web3.toHex(msg) })
+      console.log(`${signature}`)
+    })
+
+  prog
+    .command('personal-recover <msg> <signature>')
+    .description('personal recover address by msg')
+    .action(async function (msg, signature, opts) {
+      //ref https://github.com/MetaMask/eth-sig-util
+      const util = require('eth-sig-util')
+      const web3 = new Web3()
+      const address = util.recoverPersonalSignature({
+        data: web3.toHex(msg),
+        sig: signature
+      })
+      console.log(`${address}`)
     })
 
   prog
