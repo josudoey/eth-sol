@@ -53,7 +53,7 @@ module.exports = function (prog) {
     if (!exists) {
       mnemonic = prompt('input seed mnemonic word [empty is random]:')
       if (!mnemonic) {
-        mnemonic = bip39.generateMnemonic(256)
+        mnemonic = bip39.generateMnemonic(128)
       }
       const password = getNewPassword()
       const ciphertext = sjcl.encrypt(password, mnemonic)
@@ -180,7 +180,6 @@ module.exports = function (prog) {
       console.log(wallet.privKey.toString('hex'))
     }))
 
-
   prog
     .command('sign <msg>')
     .description('sign msg')
@@ -220,7 +219,6 @@ module.exports = function (prog) {
       console.log(address)
     })
 
-
   prog
     .command('personal-sign <msg>')
     .description('personal sign msg')
@@ -230,7 +228,9 @@ module.exports = function (prog) {
       const util = require('eth-sig-util')
       const web3 = new Web3()
       const privKey = wallet.privKey
-      const signature = util.personalSign(privKey, { data: web3.toHex(msg) })
+      const signature = util.personalSign(privKey, {
+        data: web3.toHex(msg)
+      })
       console.log(`${signature}`)
     })
 
