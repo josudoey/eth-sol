@@ -1,3 +1,3 @@
 # eth-sol
 
-for solidity example code
+for eth&solidity example code
